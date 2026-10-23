@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LogHarbor</title>
+<style>
+  :root { --bg:#fbfbfc; --fg:#1b1f24; --muted:#6b7280; --line:#e5e7eb; --panel:#ffffff; --accent:#2563eb;
+          --error:#b91c1c; --warn:#b45309; --info:#1f2937; --debug:#6b7280; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111317; --fg:#e5e7eb; --muted:#9ca3af; --line:#2a2f37;
+          --panel:#181b20; --accent:#60a5fa; --error:#f87171; --warn:#fbbf24; --info:#e5e7eb; --debug:#9ca3af; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line);
+           background:var(--panel); position:sticky; top:0; flex-wrap:wrap; }
+  header strong { margin-right:8px; }
+  input, select, button { font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line);
+                          border-radius:6px; padding:5px 8px; }
+  button.on { border-color:var(--accent); color:var(--accent); }
+  #q { flex:1; min-width:180px; }
+  nav button { border:none; background:none; padding:6px 10px; }
+  nav button.active { color:var(--accent); border-bottom:2px solid var(--accent); border-radius:0; }
+  main { padding:0 14px 40px; }
+  table { width:100%; border-collapse:collapse; font:12.5px/1.4 Consolas, "Cascadia Mono", monospace; }
+  td { padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td.t { white-space:nowrap; color:var(--muted); } td.s { white-space:nowrap; color:var(--muted); }
+  td.m { white-space:pre-wrap; word-break:break-word; }
+  .ERROR, .FATAL { color:var(--error); font-weight:600; } .WARN { color:var(--warn); }
+  .DEBUG, .TRACE { color:var(--debug); }
+  #meta { color:var(--muted); font-size:12.5px; padding:6px 0; }
+  .bar { height:14px; background:var(--accent); border-radius:3px; opacity:.8; }
+  .bar.err { background:var(--error); }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <strong>LogHarbor</strong>
+  <nav><button id="tab-logs" class="active">Logs</button><button id="tab-traces">Traces</button></nav>
+  <input id="q" placeholder="Search messages and fields (all words must match)">
+  <select id="level"><option value="">All levels</option><option>DEBUG</option><option>INFO</option>
+    <option>WARN</option><option value="ERROR">ERROR+</option></select>
+  <select id="since"><option value="">Any time</option><option value="900">15 min</option><option value="3600">1 hour</option>
+    <option value="86400">24 hours</option></select>
+  <input id="source" placeholder="Source" size="12">
+  <button id="live" class="on" title="Follow new lines">Live</button>
+</header>
+<main>
+  <div id="meta"></div>
+  <section id="logs"><table><tbody id="rows"></tbody></table></section>
+  <section id="traces" class="hidden"><table><tbody id="trace-rows"></tbody></table><div id="waterfall"></div></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = (ts) => new Date(ts * 1000).toLocaleString(undefined, {hour12:false, month:"2-digit", day:"2-digit",
+  hour:"2-digit", minute:"2-digit", second:"2-digit"});
+let newest = 0, live = true, timer = null;
+
+function params(extra) {
+  const p = new URLSearchParams({q:$("q").value, level:$("level").value, source:$("source").value,
+                                 since:$("since").value, limit:"300", ...extra});
+  return p.toString();
+}
+function row(r) {
+  const fields = Object.keys(r.attrs || {}).length ? "  " + esc(JSON.stringify(r.attrs)) : "";
+  return `<tr><td class="t">${fmt(r.ts)}</td><td class="${r.level}">${r.level}</td><td class="s">${esc(r.source)}</td>` +
+         `<td class="m">${esc(r.message)}<span class="s">${fields}</span></td></tr>`;
+}
+async function load(reset) {
+  const after = reset ? 0 : newest;
+  const res = await fetch("/api/logs?" + params({after_id: String(after)}));
+  const rows = await res.json();
+  if (reset) { $("rows").innerHTML = ""; newest = 0; }
+  if (rows.length) {
+    newest = Math.max(newest, rows[0].id);
+    $("rows").insertAdjacentHTML("afterbegin", rows.map(row).join(""));
+  }
+  const stats = await (await fetch("/api/stats")).json();
+  const lv = stats.levels || {};
+  $("meta").textContent = `${stats.logs.toLocaleString()} log lines from ${stats.sources.length} sources; ` +
+    `${lv.ERROR || 0} errors, ${lv.WARN || 0} warnings; ${stats.spans} spans`;
+}
+function schedule() { clearInterval(timer); if (live) timer = setInterval(() => load(false), 1500); }
+let typing;
+for (const id of ["q", "source"]) $(id).addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(() => load(true), 300); });
+for (const id of ["level", "since"]) $(id).addEventListener("change", () => load(true));
+$("live").addEventListener("click", () => { live = !live; $("live").classList.toggle("on", live); schedule(); });
+
+async function loadTraces() {
+  const traces = await (await fetch("/api/traces")).json();
+  $("trace-rows").innerHTML = traces.map((t) =>
+    `<tr data-id="${esc(t.trace_id)}" style="cursor:pointer"><td class="t">${fmt(t.start)}</td><td>${esc(t.service)}</td>` +
+    `<td class="m">${esc(t.root || t.trace_id)}</td><td>${t.duration_ms} ms</td><td>${t.spans} spans</td>` +
+    `<td class="${t.errors ? "ERROR" : ""}">${t.errors ? t.errors + " errors" : ""}</td></tr>`).join("") ||
+    "<tr><td>No traces yet. Point an OpenTelemetry SDK at http://127.0.0.1:4318 with OTEL_EXPORTER_OTLP_PROTOCOL=http/json.</td></tr>";
+  for (const tr of $("trace-rows").querySelectorAll("tr[data-id]")) tr.addEventListener("click", () => showTrace(tr.dataset.id));
+}
+async function showTrace(id) {
+  const spans = await (await fetch("/api/trace/" + encodeURIComponent(id))).json();
+  if (!spans.length) return;
+  const start = Math.min(...spans.map((s) => s.start)), end = Math.max(...spans.map((s) => s.end));
+  const total = Math.max(end - start, 1e-6);
+  $("waterfall").innerHTML = "<h3>Trace " + esc(id) + "</h3><table>" + spans.map((s) => {
+    const left = ((s.start - start) / total) * 100, width = Math.max(((s.end - s.start) / total) * 100, 0.5);
+    return `<tr><td class="m" style="width:35%">${esc(s.service)} · ${esc(s.name)}</td>` +
+           `<td style="width:10%">${((s.end - s.start) * 1000).toFixed(1)} ms</td><td><div class="bar ${s.status === "ERROR" ? "err" : ""}" ` +
+           `style="margin-left:${left}%;width:${width}%"></div></td></tr>`;
+  }).join("") + "</table>";
+}
+function tab(name) {
+  $("logs").classList.toggle("hidden", name !== "logs"); $("traces").classList.toggle("hidden", name !== "traces");
+  $("tab-logs").classList.toggle("active", name === "logs"); $("tab-traces").classList.toggle("active", name === "traces");
+  if (name === "traces") loadTraces();
+}
+$("tab-logs").addEventListener("click", () => tab("logs"));
+$("tab-traces").addEventListener("click", () => tab("traces"));
+load(true); schedule();
+</script>
+</body>
+</html>
