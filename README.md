@@ -7,7 +7,7 @@
 
 ## Download
 
-Get **LogHarbor-0.1.0-windows.zip** from [Releases](../../releases/latest), unzip it anywhere and double-click **LogHarbor.exe** in the LogHarbor folder. It starts LogHarbor and opens the page in your browser; keep its window open while you use it (close it to stop). No Python needed.
+Get **LogHarbor-0.1.1-windows.zip** from [Releases](../../releases/latest), unzip it anywhere and double-click **LogHarbor.exe** in the LogHarbor folder. It starts LogHarbor and opens the page in your browser; keep its window open while you use it (close it to stop). No Python needed.
 
 To follow log files, start it from a terminal in that folder instead: `LogHarbor.exe serve --follow D:\code\my-api\logs --open`.
 
