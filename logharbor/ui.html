@@ -52,7 +52,8 @@
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const levelClass = (l) => String(l).replace(/[^A-Z0-9_]/gi, "");
 const fmt = (ts) => new Date(ts * 1000).toLocaleString(undefined, {hour12:false, month:"2-digit", day:"2-digit",
   hour:"2-digit", minute:"2-digit", second:"2-digit"});
 let newest = 0, live = true, timer = null;
@@ -64,7 +65,7 @@ function params(extra) {
 }
 function row(r) {
   const fields = Object.keys(r.attrs || {}).length ? "  " + esc(JSON.stringify(r.attrs)) : "";
-  return `<tr><td class="t">${fmt(r.ts)}</td><td class="${r.level}">${r.level}</td><td class="s">${esc(r.source)}</td>` +
+  return `<tr><td class="t">${fmt(r.ts)}</td><td class="${levelClass(r.level)}">${esc(r.level)}</td><td class="s">${esc(r.source)}</td>` +
          `<td class="m">${esc(r.message)}<span class="s">${fields}</span></td></tr>`;
 }
 async function load(reset) {

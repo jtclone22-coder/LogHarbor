@@ -54,9 +54,12 @@ class Follower:
                 self.partial.pop(path, None)
             if size == offset:
                 continue
-            with open(path, "rb") as handle:
-                handle.seek(offset)
-                data = handle.read(min(size - offset, 8 << 20))
+            try:
+                with open(path, "rb") as handle:
+                    handle.seek(offset)
+                    data = handle.read(min(size - offset, 8 << 20))
+            except OSError:
+                continue  # locked by its writer or removed just now: try again on the next poll
             self.offsets[path] = offset + len(data)
             text = self.partial.pop(path, "") + data.decode("utf-8", errors="replace")
             lines = text.split("\n")
@@ -79,7 +82,10 @@ class Follower:
 
     def run(self) -> None:
         while not self.stop.is_set():
-            self.step()
+            try:
+                self.step()
+            except Exception:  # one bad moment (a file, a record) must never stop following every file
+                pass
             self.stop.wait(self.poll)
 
     def start(self) -> threading.Thread:

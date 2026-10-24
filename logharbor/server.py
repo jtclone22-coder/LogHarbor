@@ -47,6 +47,11 @@ def make_handler(store: Store):
             if not local_host(self.headers.get("Host")):
                 self.send_error(421, "LogHarbor only answers requests for 127.0.0.1 or localhost")
                 return False
+            origin = self.headers.get("Origin")
+            if origin is not None and not local_host(urlsplit(origin).netloc):
+                # a web page open in the browser could otherwise post log lines here (plain text needs no permission)
+                self.send_error(403, "LogHarbor only takes requests from its own page and from programs")
+                return False
             return True
 
         def _send(self, status: int, payload, content_type: str = "application/json") -> None:
@@ -58,7 +63,13 @@ def make_handler(store: Store):
             self.wfile.write(body)
 
         def _body(self) -> bytes | None:
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if length < 0:
+                self._send(400, {"error": "bad Content-Length"})
+                return None
             if length > MAX_BODY:
                 self._send(413, {"error": "too large"})
                 return None

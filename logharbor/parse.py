@@ -34,7 +34,11 @@ def normalize_level(value) -> str:
         if number >= 9: return "INFO"
         if number >= 5: return "DEBUG"
         return "TRACE"
-    return LEVELS.get(str(value or "").strip().lower(), "INFO" if not value else str(value).upper()[:8])
+    if not value:
+        return "INFO"
+    known = LEVELS.get(str(value).strip().lower())
+    # an unknown level is kept, but only as letters and digits: it goes into the page, and a log line is outside text
+    return known or re.sub(r"[^A-Z0-9_]", "", str(value).upper())[:8] or "INFO"
 
 
 def parse_time(value) -> float | None:

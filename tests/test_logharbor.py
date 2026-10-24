@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +53,24 @@ class StoreAndTailTests(unittest.TestCase):
         self.store = Store(Path(self.temp.name) / "logs.sqlite")
         self.addCleanup(self.store.close)
         self.log = Path(self.temp.name) / "app.log"
+
+    def test_a_locked_file_never_stops_following(self) -> None:
+        self.log.write_text("2026-10-22 13:00:00 INFO first\n", encoding="utf-8")
+        follower = Follower(self.store, [str(self.log)], from_start=True)
+        real_open = open
+
+        def locked(path, *args, **kwargs):
+            if str(path) == str(self.log):
+                raise PermissionError(32, "The process cannot access the file because it is being used by another process")
+            return real_open(path, *args, **kwargs)
+
+        import builtins
+        builtins.open = locked
+        try:
+            self.assertEqual(follower.step(), 0)  # locked by its writer: skipped this time, no crash
+        finally:
+            builtins.open = real_open
+        self.assertEqual(follower.step(), 1)  # and read on the next poll
 
     def test_follow_rotation_partial_lines_and_stack_traces(self) -> None:
         self.log.write_text("2026-10-22 13:00:00 INFO before start\n", encoding="utf-8")
@@ -149,6 +168,24 @@ class OtlpAndServerTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 421)
         localhost = urllib.request.Request(base + "/api/stats", headers={"Host": f"localhost:{httpd.server_address[1]}"})
         self.assertEqual(urllib.request.urlopen(localhost, timeout=5).status, 200)
+
+    def test_a_web_page_cannot_post_log_lines(self) -> None:
+        httpd = serve(self.store, 0)
+        self.addCleanup(httpd.shutdown)
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        sneaky = urllib.request.Request(base + "/ingest", data=b"hello", method="POST",
+                                        headers={"Content-Type": "text/plain", "Origin": "https://evil.example"})
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(sneaky, timeout=5)
+        self.assertEqual(caught.exception.code, 403)
+        own = urllib.request.Request(base + "/ingest", data=b"from the page", method="POST",
+                                     headers={"Content-Type": "text/plain", "Origin": base})
+        self.assertEqual(urllib.request.urlopen(own, timeout=5).status, 200)
+
+    def test_levels_from_log_lines_never_carry_markup(self) -> None:
+        record = parse_line('{"level": "x\"><img src=x onerror=alert(1)>", "msg": "hi"}', "web")
+        self.assertRegex(record["level"], r"^[A-Z0-9_]{0,8}$")
+        self.assertEqual(normalize_level("warning"), "WARN")
 
 
 if __name__ == "__main__":

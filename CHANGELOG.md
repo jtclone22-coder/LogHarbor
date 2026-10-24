@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 (2026-10-24)
+
+Fixes from a code review.
+
+- Security: a log line could put a script into the viewer page through an unknown log level, and any web page open in the browser could post log lines. Levels are now letters and digits only and escaped, and requests from other sites are refused.
+- Following files no longer stops for good when a log file is locked by its writer or removed for a moment.
+- A negative Content-Length is refused instead of holding the connection.
+
 ## 0.1.0 (2026-10-22)
 
 - Follows files, folders and globs live; handles rotation, partial lines and stack traces.

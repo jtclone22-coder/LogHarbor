@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logharbor"
-version = "0.1.0"
+version = "0.1.1"
 description = "Your logs and traces, searchable, on your own PC: file following, OTLP JSON receiver, local web UI."
 readme = "README.md"
 license = { text = "MIT" }
